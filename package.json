@@ -1,13 +1,22 @@
 {
-  "name": "claude-token-monitor-server",
-  "version": "1.0.0",
-  "description": "Local WebSocket server broadcasting Claude token usage to iPad over LAN via Bonjour",
+  "name": "claudex-monitor",
+  "version": "0.2.0",
+  "description": "Local Claude Code monitor — reads your .jsonl sessions, streams to an iPad companion over LAN, and posts daily aggregates to the public Claudex leaderboard.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "claudex": "bin/claudex.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "cli": "tsx src/cli.ts",
     "prod": "npm run build && npm start",
     "test": "tsx --test src/pricing.test.ts src/rtkTracker.test.ts src/usageCollector.test.ts"
   },
@@ -24,5 +33,17 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/2soum/claudex-monitor"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "leaderboard",
+    "monitor",
+    "tokens"
+  ],
+  "license": "MIT"
 }

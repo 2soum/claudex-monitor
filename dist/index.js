@@ -10,6 +10,7 @@ import { readBuddy } from "./buddyReader.js";
 import { readRtkGain } from "./rtkGainReader.js";
 import { inferWindowLimit } from "./limitInferer.js";
 import { priceFor } from "./pricing.js";
+import { startCloudPoster } from "./cloudPoster.js";
 const PORT = Number(process.env.PORT ?? 7337);
 const SERVICE_NAME = "Claude Token Monitor";
 const SERVICE_TYPE = "claude-tokens"; // advertised as _claude-tokens._tcp.local
@@ -299,9 +300,14 @@ async function refreshLimit() {
 }
 refreshLimit();
 setInterval(refreshLimit, 3600_000);
+// ---------- Cloud poster (public leaderboard) ----------
+// Fires immediately on start, then every 5 minutes. No-op if `claudex connect`
+// hasn't been run yet.
+const stopCloudPoster = startCloudPoster(Number(process.env.CLAUDEX_POST_INTERVAL_MS ?? 5 * 60_000));
 // Graceful shutdown so Bonjour unregisters cleanly
 async function shutdown() {
     console.log("\n[server] shutting down…");
+    stopCloudPoster();
     service.stop?.(() => bonjour.destroy());
     wss.close();
     process.exit(0);
