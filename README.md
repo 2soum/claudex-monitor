@@ -9,14 +9,29 @@ Prompts and source code never leave your machine. Only these numbers are sent: `
 
 ## Install
 
+Works on **macOS**, **Linux**, and **Windows**. Prerequisites: Node 20+, pnpm (or npm), git.
+
+### macOS / Linux
+
 ```sh
-# From source (while no brew tap exists yet)
+git clone https://github.com/2soum/claudex-monitor
+cd claudex-monitor && pnpm install && pnpm build && npm link
+```
+
+### Windows (PowerShell)
+
+```powershell
 git clone https://github.com/2soum/claudex-monitor
 cd claudex-monitor
-npm install
-npm run build
-npm link          # makes the `claudex` CLI available
+pnpm install; pnpm build; npm link
 ```
+
+After install, the `claudex` CLI is on your PATH. On Windows if PowerShell blocks the link step, run once as admin:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+> Claudex reads `~/.claude/projects/*.jsonl` (that's `%USERPROFILE%\.claude\projects` on Windows). As long as Claude Code has written sessions there, the monitor picks them up.
 
 ## Connect
 
@@ -51,6 +66,12 @@ npm link          # makes the `claudex` CLI available
 | `claudex once` | Aggregates today (UTC) and POSTs once |
 | `claudex start` | Starts the full daemon: Bonjour + WebSocket + periodic cloud post |
 | `claudex disconnect` | Removes the local config (regenerate token on the web to fully rotate) |
+
+## Running in the background
+
+**macOS / Linux (launchd or systemd):** TBD — for now, run `claudex start` in a detached `tmux` session, or a `nohup claudex start >/tmp/claudex.log 2>&1 &`.
+
+**Windows:** use Task Scheduler to run `claudex start` at login, or [nssm](https://nssm.cc/) to install it as a Windows service.
 
 ## What gets sent to the cloud
 

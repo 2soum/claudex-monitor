@@ -368,7 +368,12 @@ function emptyAggregated() {
  */
 export function runUsageSlashCommand(timeoutMs = 8000) {
     return new Promise((resolve) => {
-        const child = spawn("claude", ["--print", "/usage"], { stdio: ["ignore", "pipe", "pipe"] });
+        // Windows needs shell:true so the .cmd shim for the `claude` CLI resolves.
+        // Harmless on mac/linux.
+        const child = spawn("claude", ["--print", "/usage"], {
+            stdio: ["ignore", "pipe", "pipe"],
+            shell: process.platform === "win32",
+        });
         let out = "";
         const timer = setTimeout(() => {
             child.kill("SIGTERM");

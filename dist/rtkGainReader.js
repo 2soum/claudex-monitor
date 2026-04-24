@@ -10,6 +10,7 @@ export function readRtkGain(timeoutMs = 3000) {
         };
         const child = spawn("rtk", ["gain", "-f", "json"], {
             stdio: ["ignore", "pipe", "pipe"],
+            shell: process.platform === "win32",
         });
         let out = "";
         const timer = setTimeout(() => {
