@@ -29,6 +29,7 @@ export async function aggregateUTCDay(basePath) {
         return empty(key);
     }
     const perModel = new Map();
+    const activeHours = new Set();
     let requests = 0;
     for (const proj of projects) {
         const projDir = join(base, proj);
@@ -86,6 +87,7 @@ export async function aggregateUTCDay(basePath) {
                 entry.requests += 1;
                 perModel.set(model, entry);
                 requests += 1;
+                activeHours.add(new Date(ts).getUTCHours());
             }
         }
     }
@@ -93,6 +95,7 @@ export async function aggregateUTCDay(basePath) {
     let tokens = 0;
     let cacheSavingsUSD = 0;
     let top = null;
+    const perModelCost = [];
     for (const [model, e] of perModel) {
         const p = priceFor(model);
         const mcost = (e.input * p.input) / 1_000_000 +
@@ -103,9 +106,11 @@ export async function aggregateUTCDay(basePath) {
         costUSD += mcost;
         cacheSavingsUSD += msavings;
         tokens += e.input + e.output + e.cacheCreation + e.cacheRead;
+        perModelCost.push({ model, costUSD: round(mcost, 4) });
         if (!top || mcost > top.cost)
             top = { model, cost: mcost };
     }
+    perModelCost.sort((a, b) => b.costUSD - a.costUSD);
     return {
         dateKey: key,
         costUSD: round(costUSD, 4),
@@ -113,6 +118,8 @@ export async function aggregateUTCDay(basePath) {
         requests,
         cacheSavingsUSD: round(cacheSavingsUSD, 4),
         topModel: top?.model ?? null,
+        activeHoursUTC: [...activeHours].sort((a, b) => a - b),
+        modelsTop: perModelCost.slice(0, 4),
     };
 }
 function round(v, decimals) {
@@ -127,6 +134,8 @@ function empty(dateKey) {
         requests: 0,
         cacheSavingsUSD: 0,
         topModel: null,
+        activeHoursUTC: [],
+        modelsTop: [],
     };
 }
 export async function postToCloud(agg) {

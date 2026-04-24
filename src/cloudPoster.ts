@@ -28,6 +28,10 @@ export interface DayAggregate {
   requests: number;
   cacheSavingsUSD: number;
   topModel: string | null;
+  /** UTC hours (0–23) where we saw at least one billable JSONL entry today. */
+  activeHoursUTC: number[];
+  /** Per-model cost split today, sorted desc. Tops at 4 entries. */
+  modelsTop: Array<{ model: string; costUSD: number }>;
 }
 
 function todayUTCBoundaries(): { start: number; end: number; key: string } {
@@ -64,6 +68,7 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
     requests: number;
   };
   const perModel = new Map<string, PerModel>();
+  const activeHours = new Set<number>();
   let requests = 0;
 
   for (const proj of projects) {
@@ -118,6 +123,7 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
         entry.requests += 1;
         perModel.set(model, entry);
         requests += 1;
+        activeHours.add(new Date(ts).getUTCHours());
       }
     }
   }
@@ -126,6 +132,7 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
   let tokens = 0;
   let cacheSavingsUSD = 0;
   let top: { model: string; cost: number } | null = null;
+  const perModelCost: Array<{ model: string; costUSD: number }> = [];
   for (const [model, e] of perModel) {
     const p = priceFor(model);
     const mcost =
@@ -137,8 +144,10 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
     costUSD += mcost;
     cacheSavingsUSD += msavings;
     tokens += e.input + e.output + e.cacheCreation + e.cacheRead;
+    perModelCost.push({ model, costUSD: round(mcost, 4) });
     if (!top || mcost > top.cost) top = { model, cost: mcost };
   }
+  perModelCost.sort((a, b) => b.costUSD - a.costUSD);
 
   return {
     dateKey: key,
@@ -147,6 +156,8 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
     requests,
     cacheSavingsUSD: round(cacheSavingsUSD, 4),
     topModel: top?.model ?? null,
+    activeHoursUTC: [...activeHours].sort((a, b) => a - b),
+    modelsTop: perModelCost.slice(0, 4),
   };
 }
 
@@ -163,6 +174,8 @@ function empty(dateKey: string): DayAggregate {
     requests: 0,
     cacheSavingsUSD: 0,
     topModel: null,
+    activeHoursUTC: [],
+    modelsTop: [],
   };
 }
 
