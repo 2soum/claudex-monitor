@@ -13,6 +13,8 @@ import { priceFor } from "./pricing.js";
 import { startCloudPoster } from "./cloudPoster.js";
 import { checkForUpdate, MONITOR_VERSION } from "./version.js";
 import { readCloudConfig } from "./cloudConfig.js";
+import { spawnInstaller, RESTART_EXIT_CODE } from "./updater.js";
+const AUTO_UPDATE = process.argv.includes("--auto-update");
 const PORT = Number(process.env.PORT ?? 7337);
 const SERVICE_NAME = "Claude Token Monitor";
 const SERVICE_TYPE = "claude-tokens"; // advertised as _claude-tokens._tcp.local
@@ -275,7 +277,7 @@ const service = bonjour.publish({
 });
 service.start?.();
 console.log(`
-  Claude Token Monitor — server v${VERSION}
+  Claude Token Monitor — server v${VERSION}${AUTO_UPDATE ? " (auto-update: on)" : ""}
   ───────────────────────────────────────────
   WebSocket:  ws://0.0.0.0:${PORT}
   mDNS:       _${SERVICE_TYPE}._tcp.local.
@@ -307,7 +309,11 @@ setInterval(refreshLimit, 3600_000);
 // hasn't been run yet.
 const stopCloudPoster = startCloudPoster(Number(process.env.CLAUDEX_POST_INTERVAL_MS ?? 5 * 60_000));
 // ---------- Check for monitor updates ----------
-// Once on boot + every 6h. Prints a banner if the cloud has a newer version.
+// Once on boot + every 6h. Prints a banner, or self-installs when
+// `--auto-update` was passed. On successful self-install we exit with
+// RESTART_EXIT_CODE so a supervisor (systemd / launchd / nssm / while-loop)
+// restarts us onto the new code.
+let updateInFlight = false;
 async function checkUpdate() {
     const cfg = readCloudConfig();
     if (!cfg)
@@ -320,10 +326,45 @@ async function checkUpdate() {
   ──────────────────────────────────
   running: ${MONITOR_VERSION}
   latest:  ${info.latest}
-${info.changelog.map((l) => "    · " + l).join("\n")}
-
+${info.changelog.map((l) => "    · " + l).join("\n")}`);
+    if (!AUTO_UPDATE) {
+        console.log(`
   Update:  ${info.installCommand}
+  Or pass --auto-update to claudex start for supervised self-update.
 `);
+        return;
+    }
+    if (updateInFlight)
+        return;
+    updateInFlight = true;
+    console.log(`\n  Auto-updating now…\n`);
+    const child = spawnInstaller(cfg.apiUrl);
+    child.on("exit", (code) => {
+        if (code === 0) {
+            console.log(`\n✓ updated. Exiting ${RESTART_EXIT_CODE} so your supervisor restarts on new code.\n`);
+            try {
+                stopCloudPoster();
+            }
+            catch { /* ignore */ }
+            try {
+                service.stop?.(() => bonjour.destroy());
+            }
+            catch { /* ignore */ }
+            try {
+                wss.close();
+            }
+            catch { /* ignore */ }
+            process.exit(RESTART_EXIT_CODE);
+        }
+        else {
+            console.error(`\n✗ auto-update failed (exit ${code}). Staying on v${MONITOR_VERSION} — will retry in 6h.\n`);
+            updateInFlight = false;
+        }
+    });
+    child.on("error", (e) => {
+        console.error(`\n✗ auto-update spawn failed: ${e.message}`);
+        updateInFlight = false;
+    });
 }
 setTimeout(checkUpdate, 3000);
 setInterval(checkUpdate, 6 * 3600_000);

@@ -66,6 +66,43 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 | `claudex once` | Aggregates today (UTC) and POSTs once |
 | `claudex start` | Starts the full daemon: Bonjour + WebSocket + periodic cloud post |
 | `claudex disconnect` | Removes the local config (regenerate token on the web to fully rotate) |
+| `claudex update` | Pull + rebuild the latest version. Re-run `claudex start` after to pick up the new code. |
+| `claudex start --auto-update` | Daemon self-updates when a new release lands. Exits with code 72 so your supervisor restarts it on new code. |
+
+## Auto-update under a supervisor
+
+`--auto-update` is designed to play nice with whatever keeps the process alive.
+
+### systemd (Linux)
+
+```ini
+[Service]
+ExecStart=/home/you/.local/bin/claudex start --auto-update
+RestartForceExitStatus=72
+Restart=always
+```
+
+### launchd (macOS)
+
+```xml
+<key>KeepAlive</key><true/>
+<key>ProgramArguments</key>
+<array>
+  <string>/Users/you/.local/bin/claudex</string>
+  <string>start</string>
+  <string>--auto-update</string>
+</array>
+```
+
+### nssm (Windows)
+
+Point nssm at `claudex.cmd start --auto-update` and set `AppExit Default Restart` + restart delay.
+
+### One-liner supervisor
+
+```sh
+while :; do claudex start --auto-update || true; sleep 1; done
+```
 
 ## Running in the background
 
