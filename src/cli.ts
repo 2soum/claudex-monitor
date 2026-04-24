@@ -22,7 +22,9 @@ type Cmd =
   | "start"
   | "help"
   | "once"
-  | "update";
+  | "update"
+  | "install-service"
+  | "uninstall-service";
 
 function parseArgv(argv: string[]): { cmd: Cmd; flags: Record<string, string> } {
   const [, , cmdRaw, ...rest] = argv;
@@ -52,17 +54,24 @@ USAGE
   claudex disconnect                              Remove the stored monitor token
   claudex status                                  Show current config + a dry-run aggregate
   claudex once                                    Aggregate today + POST once, then exit
-  claudex start [--auto-update]                   Start the full daemon (WebSocket LAN + cloud)
+  claudex start [--no-auto-update]                Start the full daemon (auto-update ON by default)
   claudex update                                  Pull + build the latest monitor version
+  claudex install-service                         Install as a background service (launchd/systemd/schtasks)
+  claudex uninstall-service                       Remove the background service
   claudex help                                    Show this message
 
-AUTO-UPDATE (supervisor-friendly)
-  claudex start --auto-update
-    When a new version is detected, runs the installer inline and exits with
-    code ${72} so your supervisor can restart the daemon on new code. Works
-    with systemd (RestartForceExitStatus=72), launchd (KeepAlive=true), nssm,
-    or a simple loop:
-        while :; do claudex start --auto-update; done
+AUTO-UPDATE
+  Auto-update is ON by default. When a new monitor version lands, the daemon
+  runs the installer in-place and exits with code ${72} so your supervisor
+  restarts it on new code. Pass --no-auto-update to keep a fixed version.
+
+BACKGROUND SERVICE
+  \`claudex install-service\` sets up an always-on supervisor for your OS:
+    · macOS — a launchd user agent (~/Library/LaunchAgents/app.claudex.monitor.plist)
+    · Linux — a systemd --user service
+    · Windows — a Task Scheduler task with a restarting wrapper .cmd
+  Logs go to ~/.claudex/daemon.log. The one-liner installer calls this for
+  you automatically.
 
 CONFIG
   ~/.claudex/config.json            stores the monitor token (0600 perms)
@@ -179,8 +188,10 @@ function cmdStart(flags: Record<string, string>): Promise<number> {
     console.error("Missing dist/index.js — run `npm run build` first.");
     return Promise.resolve(1);
   }
+  // Auto-update is ON by default (v0.5+). Opt out with --no-auto-update.
+  const autoUpdate = !flags["no-auto-update"];
   const args = [entry];
-  if (flags["auto-update"]) args.push("--auto-update");
+  if (autoUpdate) args.push("--auto-update");
   const child = spawn(process.execPath, args, {
     stdio: "inherit",
     env: process.env,
@@ -190,6 +201,31 @@ function cmdStart(flags: Record<string, string>): Promise<number> {
     process.on("SIGINT", () => child.kill("SIGINT"));
     process.on("SIGTERM", () => child.kill("SIGTERM"));
   });
+}
+
+async function cmdInstallService(): Promise<number> {
+  const { installService } = await import("./serviceInstall.js");
+  const r = installService();
+  if (r.ok) {
+    console.log(`✓ ${r.message}`);
+    console.log(
+      `  The daemon will run at every login, auto-restart on crash, and self-update in place.`
+    );
+    console.log(`  Stop it anytime with \`claudex uninstall-service\`.`);
+    return 0;
+  }
+  console.error(`✗ ${r.message}`);
+  console.error(
+    `  You can still run the daemon manually: \`claudex start\``
+  );
+  return 1;
+}
+
+async function cmdUninstallService(): Promise<number> {
+  const { uninstallService } = await import("./serviceInstall.js");
+  const r = uninstallService();
+  console.log(`${r.ok ? "✓" : "✗"} ${r.message}`);
+  return r.ok ? 0 : 1;
 }
 
 async function cmdUpdate(): Promise<number> {
@@ -223,6 +259,10 @@ async function main(): Promise<number> {
       return cmdStart(flags);
     case "update":
       return cmdUpdate();
+    case "install-service":
+      return cmdInstallService();
+    case "uninstall-service":
+      return cmdUninstallService();
     case "help":
     default:
       console.log(usage());
