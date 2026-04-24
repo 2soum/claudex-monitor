@@ -15,6 +15,8 @@ import { readRtkGain } from "./rtkGainReader.js";
 import { inferWindowLimit } from "./limitInferer.js";
 import { priceFor } from "./pricing.js";
 import { startCloudPoster } from "./cloudPoster.js";
+import { checkForUpdate, MONITOR_VERSION } from "./version.js";
+import { readCloudConfig } from "./cloudConfig.js";
 import type { ServerMessage, ClientMessage, TokenSnapshot } from "./protocol.js";
 
 const PORT = Number(process.env.PORT ?? 7337);
@@ -324,6 +326,26 @@ setInterval(refreshLimit, 3600_000);
 const stopCloudPoster = startCloudPoster(
   Number(process.env.CLAUDEX_POST_INTERVAL_MS ?? 5 * 60_000)
 );
+
+// ---------- Check for monitor updates ----------
+// Once on boot + every 6h. Prints a banner if the cloud has a newer version.
+async function checkUpdate() {
+  const cfg = readCloudConfig();
+  if (!cfg) return;
+  const info = await checkForUpdate(cfg.apiUrl);
+  if (!info || !info.available) return;
+  console.log(`
+  ★ claudex-monitor update available
+  ──────────────────────────────────
+  running: ${MONITOR_VERSION}
+  latest:  ${info.latest}
+${info.changelog.map((l) => "    · " + l).join("\n")}
+
+  Update:  ${info.installCommand}
+`);
+}
+setTimeout(checkUpdate, 3000);
+setInterval(checkUpdate, 6 * 3600_000);
 
 // Graceful shutdown so Bonjour unregisters cleanly
 async function shutdown() {

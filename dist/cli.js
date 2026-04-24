@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { readCloudConfig, writeCloudConfig, clearCloudConfig, CONFIG_PATH, DEFAULT_API_URL, } from "./cloudConfig.js";
 import { aggregateUTCDay, postToCloud } from "./cloudPoster.js";
+import { checkForUpdate, MONITOR_VERSION } from "./version.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function parseArgv(argv) {
     const [, , cmdRaw, ...rest] = argv;
@@ -78,6 +79,7 @@ function cmdDisconnect() {
 }
 async function cmdStatus() {
     const cfg = readCloudConfig();
+    console.log(`claudex-monitor v${MONITOR_VERSION}`);
     if (!cfg) {
         console.log("Not connected. Run `claudex connect --token <TOKEN>`.");
         return 0;
@@ -98,6 +100,17 @@ async function cmdStatus() {
     }
     catch (e) {
         console.warn("  could not compute aggregate:", e.message);
+    }
+    try {
+        const info = await checkForUpdate(cfg.apiUrl);
+        if (info?.available) {
+            console.log("");
+            console.log(`  ★ update available — v${info.latest} (you: ${MONITOR_VERSION})`);
+            console.log(`    ${info.installCommand}`);
+        }
+    }
+    catch {
+        /* best-effort */
     }
     return 0;
 }

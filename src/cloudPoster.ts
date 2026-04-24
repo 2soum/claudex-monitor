@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { priceFor } from "./pricing.js";
 import { readCloudConfig } from "./cloudConfig.js";
+import { MONITOR_VERSION } from "./version.js";
 
 interface RawUsageBlock {
   input_tokens?: number;
@@ -181,8 +182,9 @@ export async function postToCloud(agg: DayAggregate): Promise<PostResult | null>
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${cfg.token}`,
+        "X-Claudex-Monitor-Version": MONITOR_VERSION,
       },
-      body: JSON.stringify(agg),
+      body: JSON.stringify({ ...agg, monitorVersion: MONITOR_VERSION }),
     });
     const body = await res.json().catch(() => null);
     return { ok: res.ok, status: res.status, body };

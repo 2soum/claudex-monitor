@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { priceFor } from "./pricing.js";
 import { readCloudConfig } from "./cloudConfig.js";
+import { MONITOR_VERSION } from "./version.js";
 function todayUTCBoundaries() {
     const now = new Date();
     const y = now.getUTCFullYear();
@@ -139,8 +140,9 @@ export async function postToCloud(agg) {
             headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${cfg.token}`,
+                "X-Claudex-Monitor-Version": MONITOR_VERSION,
             },
-            body: JSON.stringify(agg),
+            body: JSON.stringify({ ...agg, monitorVersion: MONITOR_VERSION }),
         });
         const body = await res.json().catch(() => null);
         return { ok: res.ok, status: res.status, body };

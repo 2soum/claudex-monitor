@@ -1,6 +1,6 @@
 {
   "name": "claudex-monitor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local Claude Code monitor — reads your .jsonl sessions, streams to an iPad companion over LAN, and posts daily aggregates to the public Claudex leaderboard.",
   "type": "module",
   "main": "dist/index.js",
