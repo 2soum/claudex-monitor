@@ -267,17 +267,25 @@ setInterval(sampleTPM, TPM_INTERVAL_MS);
 setInterval(async () => {
     await broadcastSnapshot();
 }, 30_000);
-// ---------- Bonjour service advertisement ----------
-const bonjour = new Bonjour();
-const service = bonjour.publish({
-    name: SERVICE_NAME,
-    type: SERVICE_TYPE,
-    port: PORT,
-    txt: { version: VERSION, path: "/ws" },
-});
-service.start?.();
+// ---------- Bonjour service advertisement (opt-in) ----------
+// Off by default. Each restart cycle (auto-update, launchd KeepAlive) was
+// republishing before the prior advertisement deregistered, which made
+// macOS bump the local hostname (`-2.local`, `-3.local`, …). Most users
+// don't run an iPad companion, so we keep mDNS off unless explicitly
+// requested with CLAUDEX_LAN=1.
+const ENABLE_LAN = process.env.CLAUDEX_LAN === "1";
+const bonjour = ENABLE_LAN ? new Bonjour() : null;
+const service = ENABLE_LAN
+    ? bonjour.publish({
+        name: SERVICE_NAME,
+        type: SERVICE_TYPE,
+        port: PORT,
+        txt: { version: VERSION, path: "/ws" },
+    })
+    : null;
+service?.start?.();
 console.log(`
-  Claude Token Monitor — server v${VERSION}${AUTO_UPDATE ? " (auto-update: on)" : ""}
+  Claude Token Monitor — server v${VERSION}${AUTO_UPDATE ? " (auto-update: on)" : ""}${ENABLE_LAN ? " (lan: on)" : ""}
   ───────────────────────────────────────────
   WebSocket:  ws://0.0.0.0:${PORT}
   mDNS:       _${SERVICE_TYPE}._tcp.local.
@@ -346,10 +354,30 @@ ${info.changelog.map((l) => "    · " + l).join("\n")}`);
                 stopCloudPoster();
             }
             catch { /* ignore */ }
-            try {
-                service.stop?.(() => bonjour.destroy());
-            }
-            catch { /* ignore */ }
+            // Wait for Bonjour to deregister cleanly so the next launchd restart
+            // doesn't collide with itself on the network. 1.5s hard cap so a
+            // hung mDNS doesn't block forever.
+            await new Promise((resolve) => {
+                const done = () => resolve();
+                const timer = setTimeout(done, 1500);
+                try {
+                    if (service && bonjour) {
+                        service.stop(() => {
+                            clearTimeout(timer);
+                            bonjour.destroy();
+                            done();
+                        });
+                    }
+                    else {
+                        clearTimeout(timer);
+                        done();
+                    }
+                }
+                catch {
+                    clearTimeout(timer);
+                    done();
+                }
+            });
             try {
                 wss.close();
             }
@@ -372,7 +400,27 @@ setInterval(checkUpdate, 6 * 3600_000);
 async function shutdown() {
     console.log("\n[server] shutting down…");
     stopCloudPoster();
-    service.stop?.(() => bonjour.destroy());
+    await new Promise((resolve) => {
+        const done = () => resolve();
+        const timer = setTimeout(done, 1500);
+        try {
+            if (service && bonjour) {
+                service.stop(() => {
+                    clearTimeout(timer);
+                    bonjour.destroy();
+                    done();
+                });
+            }
+            else {
+                clearTimeout(timer);
+                done();
+            }
+        }
+        catch {
+            clearTimeout(timer);
+            done();
+        }
+    });
     wss.close();
     process.exit(0);
 }
