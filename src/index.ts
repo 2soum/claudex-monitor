@@ -371,32 +371,11 @@ ${info.changelog.map((l) => "    · " + l).join("\n")}`);
   console.log(`\n  Auto-updating now…\n`);
 
   const child = spawnInstaller(cfg.apiUrl);
-  child.on("exit", (code) => {
+  child.on("exit", async (code) => {
     if (code === 0) {
       console.log(`\n✓ updated. Exiting ${RESTART_EXIT_CODE} so your supervisor restarts on new code.\n`);
       try { stopCloudPoster(); } catch { /* ignore */ }
-      // Wait for Bonjour to deregister cleanly so the next launchd restart
-      // doesn't collide with itself on the network. 1.5s hard cap so a
-      // hung mDNS doesn't block forever.
-      await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        const timer = setTimeout(done, 1500);
-        try {
-          if (service && bonjour) {
-            service.stop(() => {
-              clearTimeout(timer);
-              bonjour.destroy();
-              done();
-            });
-          } else {
-            clearTimeout(timer);
-            done();
-          }
-        } catch {
-          clearTimeout(timer);
-          done();
-        }
-      });
+      await deregisterBonjour();
       try { wss.close(); } catch { /* ignore */ }
       process.exit(RESTART_EXIT_CODE);
     } else {
@@ -413,17 +392,17 @@ setTimeout(checkUpdate, 3000);
 setInterval(checkUpdate, 6 * 3600_000);
 
 // Graceful shutdown so Bonjour unregisters cleanly
-async function shutdown() {
-  console.log("\n[server] shutting down…");
-  stopCloudPoster();
-  await new Promise<void>((resolve) => {
+function deregisterBonjour(): Promise<void> {
+  return new Promise((resolve) => {
     const done = () => resolve();
     const timer = setTimeout(done, 1500);
     try {
-      if (service && bonjour) {
-        service.stop(() => {
+      const svc: any = service;
+      const bj: any = bonjour;
+      if (svc && bj) {
+        svc.stop(() => {
           clearTimeout(timer);
-          bonjour.destroy();
+          try { bj.destroy(); } catch { /* ignore */ }
           done();
         });
       } else {
@@ -435,6 +414,12 @@ async function shutdown() {
       done();
     }
   });
+}
+
+async function shutdown() {
+  console.log("\n[server] shutting down…");
+  stopCloudPoster();
+  await deregisterBonjour();
   wss.close();
   process.exit(0);
 }
