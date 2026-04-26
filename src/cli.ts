@@ -270,4 +270,10 @@ async function main(): Promise<number> {
   }
 }
 
-main().then((code) => process.exit(code));
+// Set the exit code rather than calling process.exit(): on Windows, an
+// abrupt _exit() while libuv is still closing async handles (typical after
+// a fetch round-trip) trips an assertion in src/win/async.c. Letting Node
+// drain the event loop naturally avoids that.
+main().then((code) => {
+  process.exitCode = code ?? 0;
+});
