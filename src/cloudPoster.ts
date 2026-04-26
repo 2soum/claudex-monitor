@@ -32,6 +32,23 @@ export interface DayAggregate {
   activeHoursUTC: number[];
   /** Per-model cost split today, sorted desc. Tops at 4 entries. */
   modelsTop: Array<{ model: string; costUSD: number }>;
+  /**
+   * Schema 2 (v0.7.0+): the server recomputes cost from these raw breakdowns
+   * using its own pricing table. The client cannot lie about price anymore.
+   */
+  perModel: Array<{
+    model: string;
+    input: number;
+    output: number;
+    cacheCreation: number;
+    cacheRead: number;
+    requests: number;
+  }>;
+  /**
+   * Schema 2 (v0.7.0+): Claude Code session UUIDs that contributed to this
+   * day. Used for cross-account dedupe — a UUID can only be claimed once.
+   */
+  sessions: Array<{ id: string; messageCount: number }>;
 }
 
 function todayUTCBoundaries(): { start: number; end: number; key: string } {
@@ -69,6 +86,8 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
   };
   const perModel = new Map<string, PerModel>();
   const activeHours = new Set<number>();
+  // sessionId (JSONL filename minus ".jsonl") → message count today.
+  const sessionCounts = new Map<string, number>();
   let requests = 0;
 
   for (const proj of projects) {
@@ -90,6 +109,9 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
       }
       // Skip files older than yesterday's UTC start — today's data can't be in them.
       if (mtime < start - 24 * 3600_000) continue;
+      // The JSONL filename is the Claude Code session UUID.
+      const sessionId = f.slice(0, -".jsonl".length);
+      let sessionMessages = 0;
 
       let content: string;
       try {
@@ -123,7 +145,14 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
         entry.requests += 1;
         perModel.set(model, entry);
         requests += 1;
+        sessionMessages += 1;
         activeHours.add(new Date(ts).getUTCHours());
+      }
+      if (sessionMessages > 0) {
+        sessionCounts.set(
+          sessionId,
+          (sessionCounts.get(sessionId) ?? 0) + sessionMessages,
+        );
       }
     }
   }
@@ -149,6 +178,23 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
   }
   perModelCost.sort((a, b) => b.costUSD - a.costUSD);
 
+  // Raw per-model breakdown for schema 2 — server recomputes USD from this.
+  const perModelOut: DayAggregate["perModel"] = [];
+  for (const [model, e] of perModel) {
+    perModelOut.push({
+      model,
+      input: e.input,
+      output: e.output,
+      cacheCreation: e.cacheCreation,
+      cacheRead: e.cacheRead,
+      requests: e.requests,
+    });
+  }
+
+  const sessions: DayAggregate["sessions"] = [...sessionCounts.entries()].map(
+    ([id, messageCount]) => ({ id, messageCount }),
+  );
+
   return {
     dateKey: key,
     costUSD: round(costUSD, 4),
@@ -158,6 +204,8 @@ export async function aggregateUTCDay(basePath?: string): Promise<DayAggregate> 
     topModel: top?.model ?? null,
     activeHoursUTC: [...activeHours].sort((a, b) => a - b),
     modelsTop: perModelCost.slice(0, 4),
+    perModel: perModelOut,
+    sessions,
   };
 }
 
@@ -176,6 +224,8 @@ function empty(dateKey: string): DayAggregate {
     topModel: null,
     activeHoursUTC: [],
     modelsTop: [],
+    perModel: [],
+    sessions: [],
   };
 }
 
@@ -197,7 +247,11 @@ export async function postToCloud(agg: DayAggregate): Promise<PostResult | null>
         Authorization: `Bearer ${cfg.token}`,
         "X-Claudex-Monitor-Version": MONITOR_VERSION,
       },
-      body: JSON.stringify({ ...agg, monitorVersion: MONITOR_VERSION }),
+      body: JSON.stringify({
+        ...agg,
+        schema: 2,
+        monitorVersion: MONITOR_VERSION,
+      }),
     });
     const body = await res.json().catch(() => null);
     return { ok: res.ok, status: res.status, body };

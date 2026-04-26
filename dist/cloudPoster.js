@@ -30,6 +30,8 @@ export async function aggregateUTCDay(basePath) {
     }
     const perModel = new Map();
     const activeHours = new Set();
+    // sessionId (JSONL filename minus ".jsonl") → message count today.
+    const sessionCounts = new Map();
     let requests = 0;
     for (const proj of projects) {
         const projDir = join(base, proj);
@@ -54,6 +56,9 @@ export async function aggregateUTCDay(basePath) {
             // Skip files older than yesterday's UTC start — today's data can't be in them.
             if (mtime < start - 24 * 3600_000)
                 continue;
+            // The JSONL filename is the Claude Code session UUID.
+            const sessionId = f.slice(0, -".jsonl".length);
+            let sessionMessages = 0;
             let content;
             try {
                 content = await readFile(fp, "utf8");
@@ -87,7 +92,11 @@ export async function aggregateUTCDay(basePath) {
                 entry.requests += 1;
                 perModel.set(model, entry);
                 requests += 1;
+                sessionMessages += 1;
                 activeHours.add(new Date(ts).getUTCHours());
+            }
+            if (sessionMessages > 0) {
+                sessionCounts.set(sessionId, (sessionCounts.get(sessionId) ?? 0) + sessionMessages);
             }
         }
     }
@@ -111,6 +120,19 @@ export async function aggregateUTCDay(basePath) {
             top = { model, cost: mcost };
     }
     perModelCost.sort((a, b) => b.costUSD - a.costUSD);
+    // Raw per-model breakdown for schema 2 — server recomputes USD from this.
+    const perModelOut = [];
+    for (const [model, e] of perModel) {
+        perModelOut.push({
+            model,
+            input: e.input,
+            output: e.output,
+            cacheCreation: e.cacheCreation,
+            cacheRead: e.cacheRead,
+            requests: e.requests,
+        });
+    }
+    const sessions = [...sessionCounts.entries()].map(([id, messageCount]) => ({ id, messageCount }));
     return {
         dateKey: key,
         costUSD: round(costUSD, 4),
@@ -120,6 +142,8 @@ export async function aggregateUTCDay(basePath) {
         topModel: top?.model ?? null,
         activeHoursUTC: [...activeHours].sort((a, b) => a - b),
         modelsTop: perModelCost.slice(0, 4),
+        perModel: perModelOut,
+        sessions,
     };
 }
 function round(v, decimals) {
@@ -136,6 +160,8 @@ function empty(dateKey) {
         topModel: null,
         activeHoursUTC: [],
         modelsTop: [],
+        perModel: [],
+        sessions: [],
     };
 }
 export async function postToCloud(agg) {
@@ -151,7 +177,11 @@ export async function postToCloud(agg) {
                 Authorization: `Bearer ${cfg.token}`,
                 "X-Claudex-Monitor-Version": MONITOR_VERSION,
             },
-            body: JSON.stringify({ ...agg, monitorVersion: MONITOR_VERSION }),
+            body: JSON.stringify({
+                ...agg,
+                schema: 2,
+                monitorVersion: MONITOR_VERSION,
+            }),
         });
         const body = await res.json().catch(() => null);
         return { ok: res.ok, status: res.status, body };
